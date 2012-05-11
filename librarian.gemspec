@@ -1,6 +1,13 @@
 # -*- encoding: utf-8 -*-
-$:.push File.expand_path("../lib", __FILE__)
+require "pathname"
+
+lib = File.expand_path("../lib", __FILE__)
+$: << lib unless $:.include?(lib)
 require "librarian/version"
+require "librarian/gem_spec/file_finder"
+
+excludes        = %w(.*/* tmp pkg)
+file_finder     = Librarian::GemSpec::FileFinder(__FILE__, excludes)
 
 Gem::Specification.new do |s|
   s.name        = "librarian"
@@ -14,9 +21,9 @@ Gem::Specification.new do |s|
 
   s.rubyforge_project = "librarian"
 
-  s.files         = `git ls-files`.split("\n")
-  s.test_files    = `git ls-files -- {test,spec,features}/*`.split("\n")
-  s.executables   = `git ls-files -- bin/*`.split("\n").map{ |f| File.basename(f) }
+  s.files         = file_finder.files
+  s.test_files    = file_finder.test_files
+  s.executables   = file_finder.executables
   s.require_paths = ["lib"]
 
   s.add_dependency "thor", "~> 0.15"
