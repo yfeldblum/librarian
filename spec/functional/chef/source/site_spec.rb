@@ -74,138 +74,122 @@ module Librarian
           WebMock.reset!
         end
 
-        context "a single dependency with a site source" do
+        let(:repo_path) { tmp_path.join("methods") }
+        before { repo_path.mkpath }
 
-          context "resolving" do
-            let(:repo_path) { tmp_path.join("repo/resolve") }
-            before do
-              repo_path.rmtree if repo_path.exist?
-              repo_path.mkpath
-              repo_path.join("cookbooks").mkpath
-              cheffile = Helpers.strip_heredoc(<<-CHEFFILE)
-                #!/usr/bin/env ruby
-                cookbook "sample", :site => #{api_url.inspect}
-              CHEFFILE
-              repo_path.join("Cheffile").open("wb") { |f| f.write(cheffile) }
+        describe "class methods" do
+
+          describe ".lock_name" do
+            specify { described_class.lock_name.should == "SITE" }
+          end
+
+          describe ".from_spec_args" do
+            it "gives the expected source" do
+              args = { }
+              source = described_class.from_spec_args(env, api_url, args)
+              source.uri.should == api_url
             end
 
-            context "the resolve" do
-              it "should not raise an exception" do
-                expect { Action::Resolve.new(env).run }.to_not raise_error
-              end
-            end
-
-            context "the results" do
-              before { Action::Resolve.new(env).run }
-
-              it "should create the lockfile" do
-                repo_path.join("Cheffile.lock").should exist
-              end
-
-              it "should not attempt to install the cookbok" do
-                repo_path.join("cookbooks/sample").should_not exist
-              end
+            it "raises on unexpected args" do
+              args = {:k => 3}
+              expect { described_class.from_spec_args(env, api_url, args) }.
+                to raise_error Librarian::Error, "unrecognized options: k"
             end
           end
 
-          context "intalling" do
-            let(:repo_path) { tmp_path.join("repo/install") }
-            before do
-              repo_path.rmtree if repo_path.exist?
-              repo_path.mkpath
-              repo_path.join("cookbooks").mkpath
-              cheffile = Helpers.strip_heredoc(<<-CHEFFILE)
-                #!/usr/bin/env ruby
-                cookbook "sample", :site => #{api_url.inspect}
-              CHEFFILE
-              repo_path.join("Cheffile").open("wb") { |f| f.write(cheffile) }
-
-              Action::Resolve.new(env).run
+          describe ".from_lock_options" do
+            it "gives the expected source" do
+              options = {:remote => api_url}
+              source = described_class.from_lock_options(env, options)
+              source.uri.should == api_url
             end
 
-            context "the install" do
-              it "should not raise an exception" do
-                expect { Action::Install.new(env).run }.to_not raise_error
-              end
-            end
-
-            context "the results" do
-              before { Action::Install.new(env).run }
-
-              it "should create the lockfile" do
-                repo_path.join("Cheffile.lock").should exist
-              end
-
-              it "should create a directory for the cookbook" do
-                repo_path.join("cookbooks/sample").should exist
-              end
-
-              it "should copy the cookbook files into the cookbook directory" do
-                repo_path.join("cookbooks/sample/metadata.rb").should exist
-              end
-            end
-          end
-
-          context "resolving and separately installing" do
-            let(:repo_path) { tmp_path.join("repo/resolve-install") }
-            before do
-              repo_path.rmtree if repo_path.exist?
-              repo_path.mkpath
-              repo_path.join("cookbooks").mkpath
-              cheffile = Helpers.strip_heredoc(<<-CHEFFILE)
-                #!/usr/bin/env ruby
-                cookbook "sample", :site => #{api_url.inspect}
-              CHEFFILE
-              repo_path.join("Cheffile").open("wb") { |f| f.write(cheffile) }
-
-              Action::Resolve.new(env).run
-              repo_path.join("tmp").rmtree if repo_path.join("tmp").exist?
-            end
-
-            context "the install" do
-              it "should not raise an exception" do
-                expect { Action::Install.new(env).run }.to_not raise_error
-              end
-            end
-
-            context "the results" do
-              before { Action::Install.new(env).run }
-
-              it "should create a directory for the cookbook" do
-                repo_path.join("cookbooks/sample").should exist
-              end
-
-              it "should copy the cookbook files into the cookbook directory" do
-                repo_path.join("cookbooks/sample/metadata.rb").should exist
-              end
+            it "roundtrips" do
+              options = {:remote => api_url}
+              source = described_class.from_lock_options(env, options)
+              source.to_lock_options.should == options
             end
           end
 
         end
 
-        context "when the repo path has a space" do
+        describe "instance methods" do
+          let(:source) { described_class.new(env, api_url) }
 
-          let(:repo_path) { tmp_path.join("repo/with extra spaces/resolve") }
-
-          before do
-            repo_path.rmtree if repo_path.exist?
-            repo_path.mkpath
-            repo_path.join("cookbooks").mkpath
-
-            cheffile = Helpers.strip_heredoc(<<-CHEFFILE)
-              #!/usr/bin/env ruby
-              cookbook "sample", :site => #{api_url.inspect}
-            CHEFFILE
-            repo_path.join("Cheffile").open("wb") { |f| f.write(cheffile) }
+          describe "#manifests" do
+            it "gives a list of all manifests" do
+              manifests = source.manifests("sample")
+              manifests.should have(1).item
+              manifest = manifests.first
+              manifest.source.should be source
+              manifest.version.should == Manifest::Version.new("0.6.5")
+              manifest.dependencies.should be_empty
+            end
           end
 
-          after do
-            repo_path.rmtree
+          describe "#fetch_version" do
+            it "fetches the version based on extra" do
+              extra = "#{api_url}/cookbooks/sample/versions/0_6_5"
+              source.fetch_version("sample", extra).should == "0.6.5"
+            end
           end
 
-          context "the resolution" do
-            it "should not raise an exception" do
-              expect { Action::Resolve.new(env).run }.to_not raise_error
+          describe "#fetch_dependencies" do
+            it "fetches the dependencies based on extra" do
+              extra = "#{api_url}/cookbooks/sample/versions/0_6_5"
+              source.fetch_dependencies("sample", "0.6.5", extra).should == [ ]
+            end
+          end
+
+          describe "#pinned?" do
+            it "returns false" do
+              source.should_not be_pinned
+            end
+          end
+
+          describe "#unpin!" do
+            it "is a no-op" do
+              source.unpin!
+            end
+          end
+
+          describe "#install!" do
+            before { env.install_path.mkpath }
+
+            context "directly" do
+              it "installs the manifest" do
+                manifest = Manifest.new(source, "sample")
+                manifest.version = "0.6.5"
+                source.install!(manifest)
+                text = env.install_path.join("sample/metadata.rb").read
+                text.should == sample_metadata
+              end
+            end
+
+            context "indirectly" do
+              it "installs the manifest" do
+                manifest = source.manifests("sample").first
+                source.install!(manifest)
+                text = env.install_path.join("sample/metadata.rb").read
+                text.should == sample_metadata
+              end
+            end
+          end
+
+          describe "#to_spec_args" do
+            it "gives the expected spec args" do
+              source.to_spec_args.should == [api_url, { }]
+            end
+          end
+
+          describe "#to_lock_options" do
+            it "gives the expected lock options" do
+              source.to_lock_options.should == {:remote => api_url}
+            end
+
+            it "roundtrips" do
+              options = source.to_lock_options
+              described_class.from_lock_options(env, options).should == source
             end
           end
 
